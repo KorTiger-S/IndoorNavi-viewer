@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta name="data-root" content="./scenes">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IndoorNavi Viewer</title>
+<style>
+  :root {
+    --bg: #111418; --panel: rgba(20, 24, 30, 0.88); --text: #e6e9ee; --muted: #9aa3ae;
+    --accent: #4ea1ff; --border: rgba(255, 255, 255, 0.12);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; overflow: hidden; }
+  #canvas { position: fixed; inset: 0; display: block; }
+  .panel { position: fixed; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px; backdrop-filter: blur(6px); }
+  #controls { top: 12px; left: 12px; width: 260px; display: flex; flex-direction: column; gap: 10px; }
+  #controls h1 { font-size: 14px; margin: 0; }
+  label { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--muted); }
+  select, input[type=range] { flex: 1; min-width: 0; }
+  select { background: #1c2128; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px; }
+  .row { display: flex; gap: 6px; }
+  button { flex: 1; white-space: nowrap; background: #1c2128; color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 8px; cursor: pointer; font: inherit; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: default; border-color: var(--border); }
+  button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #stats { color: var(--muted); font-size: 12px; }
+  .help { color: var(--muted); font-size: 11.5px; border-top: 1px solid var(--border); padding-top: 8px; }
+  .help b { color: var(--text); font-weight: 600; }
+  #photo { right: 12px; bottom: 12px; width: 300px; display: none; }
+  #photo img { width: 100%; max-height: 360px; object-fit: contain; border-radius: 6px; display: block; background: #000; }
+  #photo .caption { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; color: var(--muted); }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
+  @media (max-width: 640px) {
+    #controls { width: calc(100% - 24px); }
+    #photo { width: calc(100% - 24px); left: 12px; }
+    .help { display: none; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+  "gaussian-splats-3d": "https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.7/build/gaussian-splats-3d.module.js"
+} }
+</script>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="loading">불러오는 중…</div>
+
+<div id="controls" class="panel">
+  <h1>IndoorNavi Viewer</h1>
+  <label>Scene <select id="scene"></select></label>
+  <div class="row">
+    <button id="modeOrbit" class="active">궤도</button>
+    <button id="modeWalk">걷기</button>
+  </div>
+  <div class="row" id="layerRow">
+    <button id="layerSplat">스플랫</button>
+    <button id="layerPoints" class="active">포인트</button>
+  </div>
+  <label>점 크기 <input id="pointSize" type="range" min="1" max="12" step="0.5" value="4"></label>
+  <label>카메라 표시 <input id="showCams" type="checkbox" checked></label>
+  <div class="row">
+    <button id="prev">◀ 이전 시점</button>
+    <button id="next">다음 시점 ▶</button>
+  </div>
+  <div id="stats"></div>
+  <div class="help">
+    <b>궤도</b>: 드래그 회전 · 휠 확대 · 우클릭 이동<br>
+    <b>걷기</b>: 드래그로 둘러보기 · W/A/S/D 이동 · Q/E 높이 · Shift 빠르게<br>
+    <b>←/→</b> 촬영 시점 이동 · 카메라 아이콘 클릭으로 사진 보기
+  </div>
+</div>
+
+<div id="photo" class="panel">
+  <img id="photoImg" alt="captured frame">
+  <div class="caption"><span id="photoLabel"></span><button id="photoClose" style="flex:0">닫기</button></div>
+</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
+import * as GaussianSplats3D from "gaussian-splats-3d";
+
+// ?data= overrides; deploy_pages.py sets <meta name="data-root">; local dev serves the repo root.
+const DATA_ROOT = new URLSearchParams(location.search).get("data")
+  || document.querySelector('meta[name="data-root"]')?.content
+  || "../outputs/viewer";
+const $ = (id) => document.getElementById(id);
+
+const renderer = new THREE.WebGLRenderer({ canvas: $("canvas"), antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace; // PLY colors are already sRGB
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x111418);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.02, 200);
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.enableDamping = true;
+
+let points = null, camGroup = null, sceneInfo = null, current = -1;
+let splatViewer = null, layer = "points";
+let mode = "orbit";
+const pointMat = new THREE.PointsMaterial({ size: 4, vertexColors: true, sizeAttenuation: false });
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+resize();
+
+// ---------- data loading ----------
+async function loadIndex() {
+  const res = await fetch(`${DATA_ROOT}/index.json`);
+  if (!res.ok) throw new Error(`${DATA_ROOT}/index.json 을 찾을 수 없습니다. export_viewer.py를 먼저 실행하세요.`);
+  const names = await res.json();
+  const sel = $("scene");
+  sel.innerHTML = names.map((n) => `<option value="${n}">${n.replace("capture_", "")}</option>`).join("");
+  const want = new URLSearchParams(location.search).get("scene");
+  sel.value = names.includes(want) ? want : names[names.length - 1];
+  sel.onchange = () => loadScene(sel.value);
+  await loadScene(sel.value);
+}
+
+async function loadScene(name) {
+  $("loading").style.display = "grid";
+  const base = `${DATA_ROOT}/${name}`;
+  sceneInfo = await (await fetch(`${base}/cameras.json`)).json();
+  sceneInfo.base = base;
+  const geom = await new PLYLoader().loadAsync(`${base}/${sceneInfo.points}`);
+  if (points) { scene.remove(points); points.geometry.dispose(); }
+  points = new THREE.Points(geom, pointMat);
+  scene.add(points);
+  buildCameras();
+  await loadSplat(base);
+  current = -1;
+  hidePhoto();
+  const [cx, cy, cz] = sceneInfo.center;
+  orbit.target.set(cx, cy, cz);
+  camera.position.set(cx + 3, cy + 3, cz + 3);
+  camera.up.set(0, 1, 0);
+  orbit.update();
+  $("stats").textContent = `${sceneInfo.point_count.toLocaleString()} points · ${sceneInfo.cameras.length} 촬영 시점` +
+    (sceneInfo.splat ? ` · ${sceneInfo.splat_count.toLocaleString()} gaussians` : "");
+  $("loading").style.display = "none";
+  const view = new URLSearchParams(location.search).get("view");
+  if (view !== null) goToCapture(parseInt(view, 10) || 0);
+}
+
+// ---------- gaussian splats ----------
+async function loadSplat(base) {
+  if (splatViewer) {
+    scene.remove(splatViewer);
+    await splatViewer.dispose();
+    splatViewer = null;
+  }
+  $("layerSplat").disabled = !sceneInfo.splat;
+  if (!sceneInfo.splat) { setLayer("points"); return; }
+  splatViewer = new GaussianSplats3D.DropInViewer({
+    sharedMemoryForWorkers: false, // plain http.server has no COOP/COEP headers
+    gpuAcceleratedSort: false,
+    sphericalHarmonicsDegree: 0,
+  });
+  await splatViewer.addSplatScene(`${base}/${sceneInfo.splat}`, {
+    format: GaussianSplats3D.SceneFormat.Splat, showLoadingUI: false, splatAlphaRemovalThreshold: 5,
+  });
+  scene.add(splatViewer);
+  setLayer("splat");
+}
+
+function setLayer(l) {
+  layer = l;
+  $("layerSplat").classList.toggle("active", l === "splat");
+  $("layerPoints").classList.toggle("active", l === "points");
+  if (splatViewer) splatViewer.visible = l === "splat";
+  if (points) points.visible = l === "points";
+}
+
+// ---------- capture camera frustums ----------
+function buildCameras() {
+  if (camGroup) scene.remove(camGroup);
+  camGroup = new THREE.Group();
+  const k = sceneInfo.intrinsics;
+  const d = 0.12, hw = (k.w / 2 / k.fl_x) * d, hh = (k.h / 2 / k.fl_y) * d;
+  // Frustum in OpenGL camera space (looking down -Z), matching the ARCore pose convention.
+  const v = [[0, 0, 0], [-hw, -hh, -d], [hw, -hh, -d], [hw, hh, -d], [-hw, hh, -d]];
+  const e = [0, 1, 0, 2, 0, 3, 0, 4, 1, 2, 2, 3, 3, 4, 4, 1];
+  const lineGeom = new THREE.BufferGeometry().setFromPoints(e.map((i) => new THREE.Vector3(...v[i])));
+  const pickGeom = new THREE.SphereGeometry(0.05, 8, 6);
+  const path = [];
+  sceneInfo.cameras.forEach((c, i) => {
+    const m = new THREE.Matrix4().fromArray(c.matrix.flat()).transpose();
+    const g = new THREE.Group();
+    g.matrixAutoUpdate = false;
+    g.matrix.copy(m);
+    const color = new THREE.Color().setHSL((i / sceneInfo.cameras.length) * 0.8, 0.9, 0.55);
+    g.add(new THREE.LineSegments(lineGeom, new THREE.LineBasicMaterial({ color })));
+    const pick = new THREE.Mesh(pickGeom, new THREE.MeshBasicMaterial({ visible: false }));
+    pick.userData.index = i;
+    g.add(pick);
+    camGroup.add(g);
+    path.push(new THREE.Vector3().setFromMatrixPosition(m));
+  });
+  camGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(path),
+    new THREE.LineBasicMaterial({ color: 0xff5555 })));
+  camGroup.visible = $("showCams").checked;
+  scene.add(camGroup);
+}
+
+// ---------- jump to a capture viewpoint ----------
+let fly = null;
+function goToCapture(i) {
+  const cams = sceneInfo.cameras;
+  current = (i + cams.length) % cams.length;
+  const c = cams[current];
+  const m = new THREE.Matrix4().fromArray(c.matrix.flat()).transpose();
+  const pos = new THREE.Vector3().setFromMatrixPosition(m);
+  const fwd = new THREE.Vector3(0, 0, -1).transformDirection(m);
+  // Keep the captured position and viewing direction but level the horizon (world up).
+  const look = pos.clone().add(fwd);
+  const k = sceneInfo.intrinsics;
+  const portrait = c.turns % 2 === 1;
+  const vfov = 2 * Math.atan((portrait ? k.w / 2 / k.fl_x : k.h / 2 / k.fl_y)) * 180 / Math.PI;
+  fly = { t: 0, fromPos: camera.position.clone(), toPos: pos, fromLook: currentLook(), toLook: look,
+          fromFov: camera.fov, toFov: Math.min(vfov, 90) };
+  showPhoto(c);
+}
+
+function currentLook() {
+  if (mode === "orbit") return orbit.target.clone();
+  return camera.position.clone().add(new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion));
+}
+
+function stepFly(dt) {
+  if (!fly) return;
+  fly.t = Math.min(1, fly.t + dt / 0.8);
+  const s = fly.t * fly.t * (3 - 2 * fly.t);
+  camera.position.lerpVectors(fly.fromPos, fly.toPos, s);
+  const look = new THREE.Vector3().lerpVectors(fly.fromLook, fly.toLook, s);
+  camera.fov = THREE.MathUtils.lerp(fly.fromFov, fly.toFov, s);
+  camera.updateProjectionMatrix();
+  camera.up.set(0, 1, 0);
+  camera.lookAt(look);
+  if (mode === "orbit") orbit.target.copy(look);
+  else syncWalkAngles();
+  if (fly.t >= 1) fly = null;
+}
+
+function showPhoto(c) {
+  $("photoImg").src = `${sceneInfo.base}/${c.thumb}`;
+  $("photoLabel").textContent = `시점 ${c.index + 1} / ${sceneInfo.cameras.length}`;
+  $("photo").style.display = "block";
+}
+function hidePhoto() { $("photo").style.display = "none"; }
+
+// ---------- walk mode (drag to look, WASD to move) ----------
+const keys = new Set();
+let yaw = 0, pitch = 0, dragging = false, lastX = 0, lastY = 0;
+function syncWalkAngles() {
+  const d = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+  yaw = Math.atan2(-d.x, -d.z);
+  pitch = Math.asin(THREE.MathUtils.clamp(d.y, -1, 1));
+}
+function applyWalkAngles() {
+  camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, "YXZ"));
+}
+function setMode(m) {
+  mode = m;
+  $("modeOrbit").classList.toggle("active", m === "orbit");
+  $("modeWalk").classList.toggle("active", m === "walk");
+  orbit.enabled = m === "orbit";
+  if (m === "walk") syncWalkAngles();
+  else orbit.target.copy(camera.position.clone().add(new THREE.Vector3(0, 0, -1.5).applyQuaternion(camera.quaternion)));
+}
+renderer.domElement.addEventListener("pointerdown", (e) => {
+  dragging = true; lastX = e.clientX; lastY = e.clientY;
+  pickCamera(e);
+});
+addEventListener("pointerup", () => (dragging = false));
+addEventListener("pointermove", (e) => {
+  if (mode !== "walk" || !dragging || fly) return;
+  yaw -= (e.clientX - lastX) * 0.004;
+  pitch = THREE.MathUtils.clamp(pitch - (e.clientY - lastY) * 0.004, -1.5, 1.5);
+  lastX = e.clientX; lastY = e.clientY;
+  applyWalkAngles();
+});
+addEventListener("keydown", (e) => {
+  if (e.target.tagName === "SELECT") return;
+  if (e.key === "ArrowRight") goToCapture(current + 1);
+  else if (e.key === "ArrowLeft") goToCapture(current - 1);
+  else keys.add(e.key.toLowerCase());
+});
+addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+
+function stepWalk(dt) {
+  if (mode !== "walk" || fly) return;
+  const speed = (keys.has("shift") ? 3 : 1.2) * dt;
+  const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+  const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+  const move = new THREE.Vector3();
+  if (keys.has("w")) move.add(fwd);
+  if (keys.has("s")) move.sub(fwd);
+  if (keys.has("d")) move.add(right);
+  if (keys.has("a")) move.sub(right);
+  if (keys.has("e")) move.y += 1;
+  if (keys.has("q")) move.y -= 1;
+  if (move.lengthSq()) camera.position.addScaledVector(move.normalize(), speed);
+}
+
+// ---------- picking ----------
+const raycaster = new THREE.Raycaster();
+function pickCamera(e) {
+  if (!camGroup || !camGroup.visible) return;
+  const ndc = new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  camGroup.updateMatrixWorld(true);
+  const hit = raycaster.intersectObjects(camGroup.children, true).find((h) => h.object.userData.index !== undefined);
+  if (hit) goToCapture(hit.object.userData.index);
+}
+
+// ---------- UI ----------
+$("modeOrbit").onclick = () => setMode("orbit");
+$("layerSplat").onclick = () => sceneInfo?.splat && setLayer("splat");
+$("layerPoints").onclick = () => setLayer("points");
+$("modeWalk").onclick = () => setMode("walk");
+$("pointSize").oninput = (e) => (pointMat.size = +e.target.value);
+$("showCams").onchange = (e) => camGroup && (camGroup.visible = e.target.checked);
+$("prev").onclick = () => goToCapture(current - 1);
+$("next").onclick = () => goToCapture(current + 1);
+$("photoClose").onclick = hidePhoto;
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  stepFly(dt);
+  stepWalk(dt);
+  if (mode === "orbit" && !fly) orbit.update();
+  renderer.render(scene, camera);
+});
+
+loadIndex().catch((err) => {
+  $("loading").textContent = err.message;
+  console.error(err);
+});
+</script>
+</body>
+</html>
