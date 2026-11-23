@@ -27,7 +27,7 @@
   button:hover { border-color: var(--accent); }
   button:disabled { opacity: 0.4; cursor: default; border-color: var(--border); }
   button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-  #stats { color: var(--muted); font-size: 12px; }
+  #stats { color: var(--muted); font-size: 12px; white-space: pre-line; }
   .help { color: var(--muted); font-size: 11.5px; border-top: 1px solid var(--border); padding-top: 8px; }
   .help b { color: var(--text); font-weight: 600; }
   #photo { right: 12px; bottom: 12px; width: 300px; display: none; }
@@ -61,6 +61,7 @@
   </div>
   <div class="row" id="layerRow">
     <button id="layerSplat">스플랫</button>
+    <button id="layerMesh">메쉬</button>
     <button id="layerPoints" class="active">포인트</button>
   </div>
   <label>점 크기 <input id="pointSize" type="range" min="1" max="12" step="0.5" value="4"></label>
@@ -86,6 +87,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import * as GaussianSplats3D from "gaussian-splats-3d";
 
 // ?data= overrides; deploy_pages.py sets <meta name="data-root">; local dev serves the repo root.
@@ -104,7 +106,7 @@ const orbit = new OrbitControls(camera, renderer.domElement);
 orbit.enableDamping = true;
 
 let points = null, camGroup = null, sceneInfo = null, current = -1;
-let splatViewer = null, layer = "points";
+let splatViewer = null, meshObj = null, layer = "points";
 let mode = "orbit";
 const pointMat = new THREE.PointsMaterial({ size: 4, vertexColors: true, sizeAttenuation: false });
 
@@ -139,6 +141,7 @@ async function loadScene(name) {
   points = new THREE.Points(geom, pointMat);
   scene.add(points);
   buildCameras();
+  await loadMesh(base);
   await loadSplat(base);
   current = -1;
   hidePhoto();
@@ -148,10 +151,31 @@ async function loadScene(name) {
   camera.up.set(0, 1, 0);
   orbit.update();
   $("stats").textContent = `${sceneInfo.point_count.toLocaleString()} points · ${sceneInfo.cameras.length} 촬영 시점` +
-    (sceneInfo.splat ? ` · ${sceneInfo.splat_count.toLocaleString()} gaussians` : "");
+    (sceneInfo.splat ? ` · ${sceneInfo.splat_count.toLocaleString()} gaussians` : "") + roomText(sceneInfo.structure);
   $("loading").style.display = "none";
   const view = new URLSearchParams(location.search).get("view");
   if (view !== null) goToCapture(parseInt(view, 10) || 0);
+}
+
+// ---------- mesh (TSDF fusion of AI depth) ----------
+async function loadMesh(base) {
+  if (meshObj) { scene.remove(meshObj); meshObj = null; }
+  $("layerMesh").disabled = !sceneInfo.mesh;
+  if (!sceneInfo.mesh) return;
+  const gltf = await new GLTFLoader().loadAsync(`${base}/${sceneInfo.mesh}`);
+  gltf.scene.traverse((o) => {
+    if (o.isMesh) o.material = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  });
+  meshObj = gltf.scene;
+  scene.add(meshObj);
+}
+
+function roomText(st) {
+  if (!st) return "";
+  const parts = [];
+  if (st.room) parts.push(`방 ≈ ${st.room.size_a_m.toFixed(2)} × ${st.room.size_b_m.toFixed(2)} m`);
+  if (st.ceiling_height_m) parts.push(`천장 ${st.ceiling_height_m.toFixed(2)} m`);
+  return parts.length ? `\n${parts.join(" · ")}` : "";
 }
 
 // ---------- gaussian splats ----------
@@ -162,7 +186,7 @@ async function loadSplat(base) {
     splatViewer = null;
   }
   $("layerSplat").disabled = !sceneInfo.splat;
-  if (!sceneInfo.splat) { setLayer("points"); return; }
+  if (!sceneInfo.splat) { setLayer(sceneInfo.mesh ? "mesh" : "points"); return; }
   splatViewer = new GaussianSplats3D.DropInViewer({
     sharedMemoryForWorkers: false, // plain http.server has no COOP/COEP headers
     gpuAcceleratedSort: false,
@@ -179,7 +203,9 @@ function setLayer(l) {
   layer = l;
   $("layerSplat").classList.toggle("active", l === "splat");
   $("layerPoints").classList.toggle("active", l === "points");
+  $("layerMesh").classList.toggle("active", l === "mesh");
   if (splatViewer) splatViewer.visible = l === "splat";
+  if (meshObj) meshObj.visible = l === "mesh";
   if (points) points.visible = l === "points";
 }
 
@@ -329,6 +355,7 @@ function pickCamera(e) {
 $("modeOrbit").onclick = () => setMode("orbit");
 $("layerSplat").onclick = () => sceneInfo?.splat && setLayer("splat");
 $("layerPoints").onclick = () => setLayer("points");
+$("layerMesh").onclick = () => sceneInfo?.mesh && setLayer("mesh");
 $("modeWalk").onclick = () => setMode("walk");
 $("pointSize").oninput = (e) => (pointMat.size = +e.target.value);
 $("showCams").onchange = (e) => camGroup && (camGroup.visible = e.target.checked);
