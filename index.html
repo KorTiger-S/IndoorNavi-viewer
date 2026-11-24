@@ -3,42 +3,65 @@
 <head>
 <meta name="data-root" content="./scenes">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>IndoorNavi Viewer</title>
 <style>
   :root {
-    --bg: #111418; --panel: rgba(20, 24, 30, 0.88); --text: #e6e9ee; --muted: #9aa3ae;
-    --accent: #4ea1ff; --border: rgba(255, 255, 255, 0.12);
+    --bg: #111418; --panel: rgba(20, 24, 30, 0.9); --text: #e6e9ee; --muted: #9aa3ae;
+    --accent: #4ea1ff; --danger: #e5484d; --border: rgba(255, 255, 255, 0.12);
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     font: 13px/1.4 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; overflow: hidden; }
-  #canvas { position: fixed; inset: 0; display: block; }
+  #canvas { position: fixed; inset: 0; display: block; touch-action: none; }
   .panel { position: fixed; background: var(--panel); border: 1px solid var(--border);
     border-radius: 10px; padding: 12px; backdrop-filter: blur(6px); }
-  #controls { top: 12px; left: 12px; width: 260px; display: flex; flex-direction: column; gap: 10px; }
-  #controls h1 { font-size: 14px; margin: 0; }
+  #controls { top: 12px; left: 12px; width: 270px; display: flex; flex-direction: column; gap: 10px;
+    max-height: calc(100% - 24px); overflow-y: auto; }
+  #controls.collapsed > :not(.head) { display: none; }
+  .head { display: flex; align-items: center; gap: 8px; }
+  .head h1 { font-size: 14px; margin: 0; flex: 1; }
+  #toggle { flex: 0 0 auto; width: 36px; height: 32px; padding: 0; font-size: 16px; }
   label { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--muted); }
   select, input[type=range] { flex: 1; min-width: 0; }
-  select { background: #1c2128; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px; }
+  select { background: #1c2128; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px; font: inherit; }
   .row { display: flex; gap: 6px; }
   button { flex: 1; white-space: nowrap; background: #1c2128; color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; padding: 6px 8px; cursor: pointer; font: inherit; }
+    border-radius: 6px; padding: 8px; cursor: pointer; font: inherit; min-height: 36px; }
   button:hover { border-color: var(--accent); }
   button:disabled { opacity: 0.4; cursor: default; border-color: var(--border); }
   button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { border-color: var(--danger); color: #ffb4b6; }
   #stats { color: var(--muted); font-size: 12px; white-space: pre-line; }
   .help { color: var(--muted); font-size: 11.5px; border-top: 1px solid var(--border); padding-top: 8px; }
   .help b { color: var(--text); font-weight: 600; }
+  details.admin { border-top: 1px solid var(--border); padding-top: 8px; color: var(--muted); }
+  details.admin summary { cursor: pointer; }
+  details.admin .row { margin-top: 8px; }
   #photo { right: 12px; bottom: 12px; width: 300px; display: none; }
   #photo img { width: 100%; max-height: 360px; object-fit: contain; border-radius: 6px; display: block; background: #000; }
-  #photo .caption { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; color: var(--muted); }
-  #loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
-  @media (max-width: 640px) {
+  #photo .caption { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; color: var(--muted); }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none;
+    text-align: center; padding: 16px; }
+  /* touch joystick (walk mode on touch devices) */
+  #joy { position: fixed; left: 24px; bottom: 24px; width: 120px; height: 120px; border-radius: 50%;
+    background: rgba(255,255,255,0.08); border: 1px solid var(--border); display: none; touch-action: none; }
+  #joy .knob { position: absolute; left: 40px; top: 40px; width: 40px; height: 40px; border-radius: 50%; background: rgba(78,161,255,0.7); }
+  /* modal */
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: none; place-items: center; padding: 16px; z-index: 10; }
+  #modal .box { background: #161a20; border: 1px solid var(--border); border-radius: 12px; padding: 16px; width: min(420px, 100%);
+    display: flex; flex-direction: column; gap: 10px; }
+  #modal h2 { font-size: 15px; margin: 0; }
+  #modal p { margin: 0; color: var(--muted); }
+  #modal input[type=password] { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: #0f1216; color: var(--text); font: inherit; }
+  #modal a { color: var(--accent); }
+  @media (max-width: 640px), (pointer: coarse) {
     #controls { width: calc(100% - 24px); }
-    #photo { width: calc(100% - 24px); left: 12px; }
-    .help { display: none; }
+    #photo { width: auto; left: 12px; right: 12px; bottom: 12px; }
+    #photo img { max-height: 38vh; }
+    .help .desk { display: none; }
   }
+  @media (pointer: fine) { .help .touch { display: none; } }
 </style>
 <script type="importmap">
 { "imports": {
@@ -53,16 +76,16 @@
 <div id="loading">불러오는 중…</div>
 
 <div id="controls" class="panel">
-  <h1>IndoorNavi Viewer</h1>
-  <label>Scene <select id="scene"></select></label>
+  <div class="head"><h1>IndoorNavi Viewer</h1><button id="toggle" title="메뉴 접기/펴기">☰</button></div>
+  <label>장면 <select id="scene"></select></label>
   <div class="row">
     <button id="modeOrbit" class="active">궤도</button>
     <button id="modeWalk">걷기</button>
   </div>
-  <div class="row" id="layerRow">
+  <div class="row">
     <button id="layerSplat">스플랫</button>
     <button id="layerMesh">메쉬</button>
-    <button id="layerPoints" class="active">포인트</button>
+    <button id="layerPoints">포인트</button>
   </div>
   <label>점 크기 <input id="pointSize" type="range" min="1" max="12" step="0.5" value="4"></label>
   <label>카메라 표시 <input id="showCams" type="checkbox" checked></label>
@@ -72,10 +95,21 @@
   </div>
   <div id="stats"></div>
   <div class="help">
-    <b>궤도</b>: 드래그 회전 · 휠 확대 · 우클릭 이동<br>
+    <span class="desk"><b>궤도</b>: 드래그 회전 · 휠 확대 · 우클릭 이동<br>
     <b>걷기</b>: 드래그로 둘러보기 · W/A/S/D 이동 · Q/E 높이 · Shift 빠르게<br>
-    <b>←/→</b> 촬영 시점 이동 · 카메라 아이콘 클릭으로 사진 보기
+    <b>←/→</b> 촬영 시점 이동 · 카메라 아이콘 클릭으로 사진 보기</span>
+    <span class="touch"><b>궤도</b>: 한 손가락 회전 · 두 손가락 확대/이동<br>
+    <b>걷기</b>: 왼쪽 아래 원으로 이동 · 화면 드래그로 둘러보기<br>
+    카메라 아이콘을 누르면 그 위치의 사진</span>
   </div>
+  <details class="admin" id="admin">
+    <summary>관리</summary>
+    <div class="row">
+      <button id="delSplat" class="danger">스플랫만 삭제</button>
+      <button id="delScene" class="danger">장면 전체 삭제</button>
+    </div>
+    <div class="row"><button id="forget">저장된 토큰 지우기</button></div>
+  </details>
 </div>
 
 <div id="photo" class="panel">
@@ -83,32 +117,36 @@
   <div class="caption"><span id="photoLabel"></span><button id="photoClose" style="flex:0">닫기</button></div>
 </div>
 
+<div id="joy"><div class="knob"></div></div>
+
+<div id="modal"><div class="box" id="modalBox"></div></div>
+
 <script type="module">
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import * as GaussianSplats3D from "gaussian-splats-3d";
 
 // ?data= overrides; deploy_pages.py sets <meta name="data-root">; local dev serves the repo root.
 const DATA_ROOT = new URLSearchParams(location.search).get("data")
   || document.querySelector('meta[name="data-root"]')?.content
   || "../outputs/viewer";
 const $ = (id) => document.getElementById(id);
+const TOUCH = matchMedia("(pointer: coarse)").matches;
+const SMALL = TOUCH || innerWidth < 700;
 
-const renderer = new THREE.WebGLRenderer({ canvas: $("canvas"), antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.outputColorSpace = THREE.LinearSRGBColorSpace; // PLY colors are already sRGB
+const renderer = new THREE.WebGLRenderer({ canvas: $("canvas"), antialias: !TOUCH, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(devicePixelRatio, TOUCH ? 1.25 : 2));
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace; // PLY/GLB vertex colors are already sRGB
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x111418);
 const camera = new THREE.PerspectiveCamera(60, 1, 0.02, 200);
 const orbit = new OrbitControls(camera, renderer.domElement);
 orbit.enableDamping = true;
 
-let points = null, camGroup = null, sceneInfo = null, current = -1;
-let splatViewer = null, meshObj = null, layer = "points";
-let mode = "orbit";
-const pointMat = new THREE.PointsMaterial({ size: 4, vertexColors: true, sizeAttenuation: false });
+let camGroup = null, sceneInfo = null, current = -1, mode = "orbit", layer = null, sceneToken = 0;
+const layers = { points: null, mesh: null, splat: null };   // loaded lazily, per scene
+const pointMat = new THREE.PointsMaterial({ size: TOUCH ? 3 : 4, vertexColors: true, sizeAttenuation: false });
 
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
@@ -117,32 +155,55 @@ function resize() {
 }
 addEventListener("resize", resize);
 resize();
+if (SMALL) $("controls").classList.add("collapsed");
+$("toggle").onclick = () => $("controls").classList.toggle("collapsed");
+
+const loading = (msg) => { $("loading").textContent = msg || ""; $("loading").style.display = msg ? "grid" : "none"; };
 
 // ---------- data loading ----------
+async function fetchJSON(url) {
+  const r = await fetch(`${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`, { cache: "no-store" });
+  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  return r.json();
+}
+
 async function loadIndex() {
-  const res = await fetch(`${DATA_ROOT}/index.json`);
-  if (!res.ok) throw new Error(`${DATA_ROOT}/index.json 을 찾을 수 없습니다. export_viewer.py를 먼저 실행하세요.`);
-  const names = await res.json();
+  let names;
+  try { names = await fetchJSON(`${DATA_ROOT}/index.json`); }
+  catch { throw new Error("장면 목록을 찾을 수 없습니다. (export_viewer.py / deploy_pages.py)"); }
   const sel = $("scene");
   sel.innerHTML = names.map((n) => `<option value="${n}">${n.replace("capture_", "")}</option>`).join("");
+  if (!names.length) { loading("공개된 장면이 없습니다."); return; }
   const want = new URLSearchParams(location.search).get("scene");
   sel.value = names.includes(want) ? want : names[names.length - 1];
   sel.onchange = () => loadScene(sel.value);
   await loadScene(sel.value);
 }
 
+function disposeLayers() {
+  for (const k of Object.keys(layers)) {
+    const o = layers[k];
+    if (!o) continue;
+    scene.remove(o);
+    if (k === "splat") o.dispose?.();
+    else o.traverse?.((c) => { c.geometry?.dispose(); c.material?.dispose?.(); });
+    layers[k] = null;
+  }
+}
+
 async function loadScene(name) {
-  $("loading").style.display = "grid";
+  const token = ++sceneToken;
+  loading("불러오는 중…");
+  disposeLayers();
   const base = `${DATA_ROOT}/${name}`;
-  sceneInfo = await (await fetch(`${base}/cameras.json`)).json();
+  sceneInfo = await fetchJSON(`${base}/cameras.json`);
   sceneInfo.base = base;
-  const geom = await new PLYLoader().loadAsync(`${base}/${sceneInfo.points}`);
-  if (points) { scene.remove(points); points.geometry.dispose(); }
-  points = new THREE.Points(geom, pointMat);
-  scene.add(points);
+  sceneInfo.name = name;
   buildCameras();
-  await loadMesh(base);
-  await loadSplat(base);
+  $("layerSplat").disabled = !sceneInfo.splat;
+  $("layerMesh").disabled = !sceneInfo.mesh;
+  $("layerPoints").disabled = !sceneInfo.points;
+  $("delSplat").disabled = !sceneInfo.splat;
   current = -1;
   hidePhoto();
   const [cx, cy, cz] = sceneInfo.center;
@@ -150,63 +211,77 @@ async function loadScene(name) {
   camera.position.set(cx + 3, cy + 3, cz + 3);
   camera.up.set(0, 1, 0);
   orbit.update();
-  $("stats").textContent = `${sceneInfo.point_count.toLocaleString()} points · ${sceneInfo.cameras.length} 촬영 시점` +
-    (sceneInfo.splat ? ` · ${sceneInfo.splat_count.toLocaleString()} gaussians` : "") + roomText(sceneInfo.structure);
-  $("loading").style.display = "none";
+  updateStats();
+  // Phones: start with the light mesh; splats are loaded only on request (and a reduced version).
+  const first = (!TOUCH && sceneInfo.splat) ? "splat" : sceneInfo.mesh ? "mesh" : sceneInfo.points ? "points" : "splat";
+  await setLayer(first, token);
+  if (token !== sceneToken) return;
+  loading(null);
   const view = new URLSearchParams(location.search).get("view");
   if (view !== null) goToCapture(parseInt(view, 10) || 0);
 }
 
-// ---------- mesh (TSDF fusion of AI depth) ----------
-async function loadMesh(base) {
-  if (meshObj) { scene.remove(meshObj); meshObj = null; }
-  $("layerMesh").disabled = !sceneInfo.mesh;
-  if (!sceneInfo.mesh) return;
-  const gltf = await new GLTFLoader().loadAsync(`${base}/${sceneInfo.mesh}`);
-  gltf.scene.traverse((o) => {
-    if (o.isMesh) o.material = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
-  });
-  meshObj = gltf.scene;
-  scene.add(meshObj);
-}
-
-function roomText(st) {
-  if (!st) return "";
-  const parts = [];
-  if (st.room) parts.push(`방 ≈ ${st.room.size_a_m.toFixed(2)} × ${st.room.size_b_m.toFixed(2)} m`);
-  if (st.ceiling_height_m) parts.push(`천장 ${st.ceiling_height_m.toFixed(2)} m`);
-  return parts.length ? `\n${parts.join(" · ")}` : "";
-}
-
-// ---------- gaussian splats ----------
-async function loadSplat(base) {
-  if (splatViewer) {
-    scene.remove(splatViewer);
-    await splatViewer.dispose();
-    splatViewer = null;
+function updateStats() {
+  const st = sceneInfo.structure;
+  const parts = [`${sceneInfo.cameras.length} 촬영 시점`];
+  if (sceneInfo.point_count) parts.push(`${sceneInfo.point_count.toLocaleString()} points`);
+  if (sceneInfo.splat) parts.push(`${(TOUCH && sceneInfo.splat_mobile_count ? sceneInfo.splat_mobile_count : sceneInfo.splat_count).toLocaleString()} gaussians`);
+  let room = "";
+  if (st) {
+    const r = st.room_enclosing || st.room;
+    const bits = [];
+    if (r) bits.push(`방 ≈ ${r.size_a_m.toFixed(2)} × ${r.size_b_m.toFixed(2)} m`);
+    if (st.ceiling_height_m) bits.push(`천장 ${st.ceiling_height_m.toFixed(2)} m`);
+    if (bits.length) room = `\n${bits.join(" · ")}`;
   }
-  $("layerSplat").disabled = !sceneInfo.splat;
-  if (!sceneInfo.splat) { setLayer(sceneInfo.mesh ? "mesh" : "points"); return; }
-  splatViewer = new GaussianSplats3D.DropInViewer({
-    sharedMemoryForWorkers: false, // plain http.server has no COOP/COEP headers
-    gpuAcceleratedSort: false,
-    sphericalHarmonicsDegree: 0,
-  });
-  await splatViewer.addSplatScene(`${base}/${sceneInfo.splat}`, {
-    format: GaussianSplats3D.SceneFormat.Splat, showLoadingUI: false, splatAlphaRemovalThreshold: 5,
-  });
-  scene.add(splatViewer);
-  setLayer("splat");
+  $("stats").textContent = parts.join(" · ") + room;
 }
 
-function setLayer(l) {
+async function ensureLayer(l) {
+  if (layers[l]) return layers[l];
+  const base = sceneInfo.base;
+  if (l === "points") {
+    const geom = await new PLYLoader().loadAsync(`${base}/${sceneInfo.points}`);
+    layers.points = new THREE.Points(geom, pointMat);
+  } else if (l === "mesh") {
+    const gltf = await new GLTFLoader().loadAsync(`${base}/${sceneInfo.mesh}`);
+    gltf.scene.traverse((o) => {
+      if (o.isMesh) o.material = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    });
+    layers.mesh = gltf.scene;
+  } else if (l === "splat") {
+    const GaussianSplats3D = await import("gaussian-splats-3d");
+    const v = new GaussianSplats3D.DropInViewer({
+      sharedMemoryForWorkers: false, // GitHub Pages / http.server: no COOP/COEP headers
+      gpuAcceleratedSort: false,
+      sphericalHarmonicsDegree: 0,
+    });
+    const file = TOUCH && sceneInfo.splat_mobile ? sceneInfo.splat_mobile : sceneInfo.splat;
+    await v.addSplatScene(`${base}/${file}`, {
+      format: GaussianSplats3D.SceneFormat.Splat, showLoadingUI: false, splatAlphaRemovalThreshold: 5,
+    });
+    layers.splat = v;
+  }
+  scene.add(layers[l]);
+  return layers[l];
+}
+
+async function setLayer(l, token = sceneToken) {
+  if (l === "splat" && !sceneInfo.splat) return;
+  if (l === "mesh" && !sceneInfo.mesh) return;
+  if (l === "points" && !sceneInfo.points) return;
   layer = l;
-  $("layerSplat").classList.toggle("active", l === "splat");
-  $("layerPoints").classList.toggle("active", l === "points");
-  $("layerMesh").classList.toggle("active", l === "mesh");
-  if (splatViewer) splatViewer.visible = l === "splat";
-  if (meshObj) meshObj.visible = l === "mesh";
-  if (points) points.visible = l === "points";
+  for (const k of ["splat", "mesh", "points"]) {
+    $(`layer${k[0].toUpperCase()}${k.slice(1)}`).classList.toggle("active", k === l);
+  }
+  if (!layers[l]) {
+    loading(l === "splat" ? "스플랫 불러오는 중… (용량이 커서 시간이 걸릴 수 있어요)" : "불러오는 중…");
+    try { await ensureLayer(l); }
+    catch (e) { console.error(e); loading(`불러오기 실패: ${e.message}`); return; }
+    if (token !== sceneToken) return;
+    loading(null);
+  }
+  for (const k of Object.keys(layers)) if (layers[k]) layers[k].visible = k === layer;
 }
 
 // ---------- capture camera frustums ----------
@@ -219,7 +294,7 @@ function buildCameras() {
   const v = [[0, 0, 0], [-hw, -hh, -d], [hw, -hh, -d], [hw, hh, -d], [-hw, hh, -d]];
   const e = [0, 1, 0, 2, 0, 3, 0, 4, 1, 2, 2, 3, 3, 4, 4, 1];
   const lineGeom = new THREE.BufferGeometry().setFromPoints(e.map((i) => new THREE.Vector3(...v[i])));
-  const pickGeom = new THREE.SphereGeometry(0.05, 8, 6);
+  const pickGeom = new THREE.SphereGeometry(TOUCH ? 0.09 : 0.05, 8, 6);
   const path = [];
   sceneInfo.cameras.forEach((c, i) => {
     const m = new THREE.Matrix4().fromArray(c.matrix.flat()).transpose();
@@ -286,9 +361,10 @@ function showPhoto(c) {
 }
 function hidePhoto() { $("photo").style.display = "none"; }
 
-// ---------- walk mode (drag to look, WASD to move) ----------
+// ---------- walk mode (drag to look; WASD or touch joystick to move) ----------
 const keys = new Set();
-let yaw = 0, pitch = 0, dragging = false, lastX = 0, lastY = 0;
+const joyMove = new THREE.Vector2();
+let yaw = 0, pitch = 0, dragging = false, lastX = 0, lastY = 0, downX = 0, downY = 0;
 function syncWalkAngles() {
   const d = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
   yaw = Math.atan2(-d.x, -d.z);
@@ -302,28 +378,53 @@ function setMode(m) {
   $("modeOrbit").classList.toggle("active", m === "orbit");
   $("modeWalk").classList.toggle("active", m === "walk");
   orbit.enabled = m === "orbit";
+  $("joy").style.display = m === "walk" && TOUCH ? "block" : "none";
   if (m === "walk") syncWalkAngles();
   else orbit.target.copy(camera.position.clone().add(new THREE.Vector3(0, 0, -1.5).applyQuaternion(camera.quaternion)));
 }
 renderer.domElement.addEventListener("pointerdown", (e) => {
-  dragging = true; lastX = e.clientX; lastY = e.clientY;
-  pickCamera(e);
+  dragging = true; lastX = downX = e.clientX; lastY = downY = e.clientY;
+});
+renderer.domElement.addEventListener("pointerup", (e) => {
+  dragging = false;
+  if (Math.hypot(e.clientX - downX, e.clientY - downY) < 8) pickCamera(e);  // a tap, not a drag
 });
 addEventListener("pointerup", () => (dragging = false));
-addEventListener("pointermove", (e) => {
+renderer.domElement.addEventListener("pointermove", (e) => {
   if (mode !== "walk" || !dragging || fly) return;
-  yaw -= (e.clientX - lastX) * 0.004;
-  pitch = THREE.MathUtils.clamp(pitch - (e.clientY - lastY) * 0.004, -1.5, 1.5);
+  const k = TOUCH ? 0.006 : 0.004;
+  yaw -= (e.clientX - lastX) * k;
+  pitch = THREE.MathUtils.clamp(pitch - (e.clientY - lastY) * k, -1.5, 1.5);
   lastX = e.clientX; lastY = e.clientY;
   applyWalkAngles();
 });
 addEventListener("keydown", (e) => {
-  if (e.target.tagName === "SELECT") return;
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
   if (e.key === "ArrowRight") goToCapture(current + 1);
   else if (e.key === "ArrowLeft") goToCapture(current - 1);
   else keys.add(e.key.toLowerCase());
 });
 addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+
+// touch joystick
+(() => {
+  const joy = $("joy"), knob = joy.querySelector(".knob");
+  let id = null;
+  const set = (e) => {
+    const r = joy.getBoundingClientRect();
+    let x = (e.clientX - r.left - r.width / 2) / (r.width / 2);
+    let y = (e.clientY - r.top - r.height / 2) / (r.height / 2);
+    const len = Math.hypot(x, y);
+    if (len > 1) { x /= len; y /= len; }
+    joyMove.set(x, y);
+    knob.style.transform = `translate(${x * 40}px, ${y * 40}px)`;
+  };
+  joy.addEventListener("pointerdown", (e) => { id = e.pointerId; joy.setPointerCapture(id); set(e); e.stopPropagation(); });
+  joy.addEventListener("pointermove", (e) => { if (e.pointerId === id) set(e); });
+  const end = (e) => { if (e.pointerId !== id) return; id = null; joyMove.set(0, 0); knob.style.transform = ""; };
+  joy.addEventListener("pointerup", end);
+  joy.addEventListener("pointercancel", end);
+})();
 
 function stepWalk(dt) {
   if (mode !== "walk" || fly) return;
@@ -337,6 +438,11 @@ function stepWalk(dt) {
   if (keys.has("a")) move.sub(right);
   if (keys.has("e")) move.y += 1;
   if (keys.has("q")) move.y -= 1;
+  if (joyMove.lengthSq() > 0.01) {
+    move.addScaledVector(fwd, -joyMove.y).addScaledVector(right, joyMove.x);
+    camera.position.addScaledVector(move, speed);
+    return;
+  }
   if (move.lengthSq()) camera.position.addScaledVector(move.normalize(), speed);
 }
 
@@ -351,17 +457,120 @@ function pickCamera(e) {
   if (hit) goToCapture(hit.object.userData.index);
 }
 
+// ---------- admin: delete scan data from the published site (GitHub API) ----------
+// The site is static (GitHub Pages), so deleting means committing to its repository. Requires a
+// fine-grained token with "Contents: read & write" on this repository only. Kept for this tab
+// unless "remember" is ticked.
+const REPO = (() => {
+  if (!location.hostname.endsWith("github.io")) return null;
+  const repo = location.pathname.split("/").filter(Boolean)[0];
+  return repo ? { owner: location.hostname.split(".")[0], repo } : null;
+})();
+const TOKEN_KEY = "indoornavi_gh_token";
+const store = {
+  get() { try { return sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY); } catch { return null; } },
+  set(v, remember) { try { (remember ? localStorage : sessionStorage).setItem(TOKEN_KEY, v); } catch {} },
+  clear() { try { sessionStorage.removeItem(TOKEN_KEY); localStorage.removeItem(TOKEN_KEY); } catch {} },
+};
+
+function modal(html) {
+  return new Promise((resolve) => {
+    $("modalBox").innerHTML = html;
+    $("modal").style.display = "grid";
+    $("modalBox").querySelectorAll("[data-v]").forEach((b) => (b.onclick = () => {
+      const input = $("modalBox").querySelector("input[type=password]");
+      const rem = $("modalBox").querySelector("input[type=checkbox]");
+      $("modal").style.display = "none";
+      resolve({ action: b.dataset.v, value: input?.value.trim(), remember: rem?.checked });
+    }));
+  });
+}
+
+async function askToken() {
+  const existing = store.get();
+  if (existing) return existing;
+  const r = await modal(`
+    <h2>GitHub 토큰이 필요해요</h2>
+    <p>웹뷰는 GitHub Pages 정적 사이트라서, 삭제는 저장소(<b>${REPO.owner}/${REPO.repo}</b>)에 커밋하는 방식으로 합니다.</p>
+    <p><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Fine-grained 토큰 만들기</a>
+       → Repository access: <b>Only select repositories → ${REPO.repo}</b>, Permissions: <b>Contents: Read and write</b></p>
+    <input type="password" placeholder="github_pat_..." autocomplete="off">
+    <label style="justify-content:flex-start"><input type="checkbox"> 이 기기에 기억하기 (기본: 탭을 닫으면 삭제)</label>
+    <div class="row"><button data-v="cancel">취소</button><button data-v="ok" class="active">확인</button></div>`);
+  if (r.action !== "ok" || !r.value) return null;
+  store.set(r.value, r.remember);
+  return r.value;
+}
+
+async function gh(token, path, opts = {}) {
+  const res = await fetch(`https://api.github.com/repos/${REPO.owner}/${REPO.repo}${path}`, {
+    ...opts,
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json",
+               "X-GitHub-Api-Version": "2022-11-28", ...(opts.body ? { "Content-Type": "application/json" } : {}) },
+  });
+  if (!res.ok) {
+    const msg = (await res.json().catch(() => ({}))).message || res.statusText;
+    if (res.status === 401 || res.status === 403) store.clear();
+    throw new Error(`GitHub API ${res.status}: ${msg}`);
+  }
+  return res.json();
+}
+
+async function deleteFromSite(what) {
+  if (!REPO) { alert("삭제는 GitHub Pages에 게시된 웹뷰에서만 할 수 있어요. (로컬 미리보기에서는 파일을 직접 지우세요)"); return; }
+  const name = sceneInfo.name;
+  const label = what === "scene" ? `장면 ${name} 전체 (사진·메쉬·포인트·스플랫)` : `장면 ${name}의 스플랫`;
+  const c = await modal(`<h2>삭제할까요?</h2><p>${label}을(를) 공개 웹뷰에서 삭제합니다. 되돌리려면 다시 배포해야 해요.</p>
+    <div class="row"><button data-v="cancel">취소</button><button data-v="ok" class="danger">삭제</button></div>`);
+  if (c.action !== "ok") return;
+  const token = await askToken();
+  if (!token) return;
+  loading("삭제하는 중…");
+  try {
+    const ref = await gh(token, "/git/ref/heads/main");
+    const head = ref.object.sha;
+    const commit = await gh(token, `/git/commits/${head}`);
+    const tree = await gh(token, `/git/trees/${commit.tree.sha}?recursive=1`);
+    const prefix = `${DATA_ROOT.replace(/^\.\//, "")}/${name}/`;
+    const entries = [];
+    if (what === "scene") {
+      for (const t of tree.tree) if (t.type === "blob" && t.path.startsWith(prefix)) entries.push({ path: t.path, mode: "100644", type: "blob", sha: null });
+      const names = (await fetchJSON(`${DATA_ROOT}/index.json`)).filter((n) => n !== name);
+      entries.push({ path: `${DATA_ROOT.replace(/^\.\//, "")}/index.json`, mode: "100644", type: "blob", content: JSON.stringify(names) });
+    } else {
+      for (const t of tree.tree) if (t.type === "blob" && t.path.startsWith(prefix) && t.path.endsWith(".splat")) entries.push({ path: t.path, mode: "100644", type: "blob", sha: null });
+      const info = await fetchJSON(`${sceneInfo.base}/cameras.json`);
+      for (const k of ["splat", "splat_count", "splat_mobile", "splat_mobile_count"]) delete info[k];
+      entries.push({ path: `${prefix}cameras.json`, mode: "100644", type: "blob", content: JSON.stringify(info) });
+    }
+    const newTree = await gh(token, "/git/trees", { method: "POST", body: JSON.stringify({ base_tree: commit.tree.sha, tree: entries }) });
+    const newCommit = await gh(token, "/git/commits", { method: "POST", body: JSON.stringify({
+      message: `Delete ${what === "scene" ? "scene" : "splat of"} ${name} (web viewer)`, tree: newTree.sha, parents: [head] }) });
+    await gh(token, "/git/refs/heads/main", { method: "PATCH", body: JSON.stringify({ sha: newCommit.sha }) });
+    loading(null);
+    await modal(`<h2>삭제했어요</h2><p>GitHub Pages에 반영되기까지 1~2분 걸려요. 잠시 후 새로고침하세요.</p>
+      <div class="row"><button data-v="ok" class="active">확인</button></div>`);
+  } catch (e) {
+    console.error(e);
+    loading(null);
+    await modal(`<h2>삭제 실패</h2><p>${e.message}</p><div class="row"><button data-v="ok">닫기</button></div>`);
+  }
+}
+
 // ---------- UI ----------
 $("modeOrbit").onclick = () => setMode("orbit");
-$("layerSplat").onclick = () => sceneInfo?.splat && setLayer("splat");
-$("layerPoints").onclick = () => setLayer("points");
-$("layerMesh").onclick = () => sceneInfo?.mesh && setLayer("mesh");
 $("modeWalk").onclick = () => setMode("walk");
+$("layerSplat").onclick = () => setLayer("splat");
+$("layerMesh").onclick = () => setLayer("mesh");
+$("layerPoints").onclick = () => setLayer("points");
 $("pointSize").oninput = (e) => (pointMat.size = +e.target.value);
 $("showCams").onchange = (e) => camGroup && (camGroup.visible = e.target.checked);
 $("prev").onclick = () => goToCapture(current - 1);
 $("next").onclick = () => goToCapture(current + 1);
 $("photoClose").onclick = hidePhoto;
+$("delSplat").onclick = () => deleteFromSite("splat");
+$("delScene").onclick = () => deleteFromSite("scene");
+$("forget").onclick = () => { store.clear(); alert("저장된 토큰을 지웠어요."); };
 
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
@@ -373,7 +582,7 @@ renderer.setAnimationLoop(() => {
 });
 
 loadIndex().catch((err) => {
-  $("loading").textContent = err.message;
+  loading(err.message);
   console.error(err);
 });
 </script>
